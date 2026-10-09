@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Simulateur ERMET — dépose de couvercle</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #18212B; --muted: #5A6572; --accent: #1D5AA6; --line: #C9D0D6;
+    --ok: #2F6B4F; --on: #22C55E; --warn: #C55A11; --danger: #C00000;
+    --bg: #F4F6F8; --panel: #FFFFFF;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Calibri, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); font-size: 17px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 4px 18px; background: var(--panel); border-bottom: 2px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; display: inline; }
+  header .sub { color: var(--muted); font-size: 12px; display: inline; margin-left: 10px; }
+  .spacer { flex: 1; }
+  .modes { display: flex; gap: 6px; }
+  .modes button { font: inherit; font-size: 13px; font-weight: bold; padding: 4px 12px; border: 2px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .modes button.active { border-color: var(--accent); color: var(--accent); background: #EAF1FB; }
+  .status { display: flex; align-items: center; gap: 6px; font-weight: bold; font-size: 13px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #999; box-shadow: 0 0 0 2px #fff inset; }
+  .dot.on { background: var(--on); } .dot.warn { background: var(--warn); } .dot.off { background: var(--danger); }
+  /* Mise en page plein écran : de l'en-tête aux E/S sans défiler ; le dessin des vérins prend
+     toute la hauteur restante (priorité de taille), le GRAFCET occupe la colonne de droite. */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 10px; padding: 8px 14px; height: calc(100vh - 36px); min-height: 520px; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .pocard { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .iogrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; flex: 0 0 auto; }
+  .iogrid .card { padding: 6px 12px; }
+  .iogrid .card h2 { font-size: 12px; margin-bottom: 4px; }
+  .inrow { display: flex; gap: 14px; align-items: flex-start; }
+  .inrow .io { flex: 1; }
+  .col-g7 .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .extra { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 14px 10px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; height: auto; } .extra { grid-template-columns: 1fr; } }
+  .po-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; font-size: 14px; }
+  .po-bar .btn[disabled] { opacity: .45; cursor: default; }
+  .legendair { color: var(--muted); font-size: 13px; }
+  .legendair i { display: inline-block; width: 18px; height: 10px; border: 1px solid #8a9096; vertical-align: middle; margin: 0 4px 0 8px; }
+  .legendair i.off { background: #E3E7EB; } .legendair i.on { background: #F4B183; }
+  .muted { color: var(--muted); font-weight: normal; }
+  .faults { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 15px; }
+  .faults input { width: 18px; height: 18px; vertical-align: -3px; margin-right: 6px; }
+  /* GRAFCET animé */
+  #g7 { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; }
+  .g7 { height: 100%; width: auto; max-width: 100%; display: block; }
+  .g7 .evt { stroke: #18212B; stroke-width: 2; fill: #18212B; }
+  .g7 .act.on .evt { stroke: var(--accent); fill: var(--accent); }
+  .g7 .stepbox { fill: #fff; stroke: #18212B; stroke-width: 2.5; transition: fill .2s, stroke .2s; }
+  .g7 .stepin { fill: none; stroke: #18212B; stroke-width: 2; }
+  .g7 .num { font: bold 21px Calibri, Arial, sans-serif; fill: #18212B; text-anchor: middle; }
+  .g7 .token { fill: #fff; display: none; }
+  .g7 .step.active .stepbox { fill: var(--accent); stroke: var(--accent); }
+  .g7 .step.active .stepin { stroke: #fff; }
+  .g7 .step.active .num { fill: #fff; }
+  .g7 .step.active .token { display: inline; }
+  .g7 .act rect { fill: #fff; stroke: #18212B; stroke-width: 2; transition: fill .2s; }
+  .g7 .act text { font: bold 15px Calibri, Arial, sans-serif; fill: #18212B; text-anchor: middle; }
+  .g7 .act.on rect { fill: #EAF1FB; stroke: var(--accent); stroke-width: 3; }
+  .g7 .act.on text { fill: var(--accent); }
+  .g7 .link { stroke: #18212B; stroke-width: 2.5; fill: none; }
+  .g7 .tbar { stroke: #18212B; stroke-width: 4; }
+  .g7 .tr.valid .tbar { stroke: var(--warn); stroke-width: 7; }
+  .g7 .tr.ready .tbar { stroke: var(--on); stroke-width: 7; }
+  .g7 .tr.fired .tbar { animation: fire .8s ease-out; }
+  @keyframes fire { 0% { stroke: var(--on); stroke-width: 14; } 100% { stroke-width: 4; } }
+  .g7 .rec { font: bold 16px Calibri, Arial, sans-serif; fill: #18212B; }
+  .g7 .rec .v { fill: #8a9096; }
+  .g7 .rec .v.true { fill: #15803d; }
+  .g7 .tmr { display: none; } .g7 .tr.valid .tmr { display: inline; }
+  .g7 .tmr .bg { fill: #E3E7EB; } .g7 .tmr .fg { fill: var(--warn); } .g7 .tr.ready .tmr .fg { fill: var(--on); }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); margin-top: 4px; flex: 0 0 auto; }
+  .legend i { display: inline-block; width: 22px; height: 6px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card h2 { font-size: 15px; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+  canvas { flex: 1 1 auto; min-height: 0; width: 100%; object-fit: contain; display: block; background: #fff; border-radius: 6px; }
+  .io { display: grid; grid-template-columns: 18px 60px 54px 1fr; align-items: center; gap: 3px 6px; font-size: 14px; }
+  .io .led { width: 15px; height: 15px; border-radius: 50%; background: #B8BEC4; border: 2px solid #8a9096; }
+  .io .led.on { background: var(--on); border-color: #15803d; box-shadow: 0 0 8px var(--on); }
+  .io .name { font-weight: bold; }
+  .io .addr { color: var(--accent); font-family: Consolas, monospace; font-size: 13px; }
+  .io .desc { color: var(--muted); font-size: 11.5px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .io .row { display: contents; }
+  .dcy { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 2px 0 0; text-align: center; }
+  .dcy button { font: inherit; font-size: 14px; font-weight: bold; color: #fff; background: #2f6b4f; border: 0; border-radius: 50%; width: 50px; height: 50px; cursor: pointer; box-shadow: 0 4px 0 #1d4634; user-select: none; }
+  .dcy button:active, .dcy button.pressed { transform: translateY(3px); box-shadow: 0 1px 0 #1d4634; background: var(--on); }
+  .dcy .hint { color: var(--muted); font-size: 11px; line-height: 1.15; }
+  .stepdesc { margin-top: 6px; font-size: 13px; line-height: 1.25; color: var(--ink); flex: 0 0 auto; }
+  details summary { cursor: pointer; font-weight: bold; color: var(--accent); }
+  .cfg { display: grid; grid-template-columns: 90px 110px 90px 110px; gap: 6px 10px; align-items: center; margin-top: 8px; font-size: 15px; }
+  .cfg input { font: inherit; font-family: Consolas, monospace; width: 100px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; }
+  .cfg .full { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+  .btn { font: inherit; padding: 6px 14px; border: 2px solid var(--accent); color: var(--accent); background: #fff; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  .btn.small { padding: 3px 10px; font-size: 14px; }
+  .warnbox { background: #FFF4E5; border-left: 4px solid var(--warn); padding: 8px 10px; font-size: 14px; margin-top: 8px; display: none; }
+  .demo-ctl { display: none; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Simulateur ERMET — dépose de couvercle d'écrin</h1>
+    <div class="sub">BTS CRSA · Partie opérative virtuelle pour PLCSIM Advanced · Imen MKAOUAR-ELKHALDI</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="modes">
+    <button data-mode="plc">Automate (PLCSIM)</button>
+    <button data-mode="demo">Démo guidée</button>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusTxt">Hors ligne</span></div>
+</header>
+
+<main>
+  <div class="col col-po">
+    <div class="card pocard">
+      <canvas id="cv" width="1000" height="456"></canvas>
+      <div class="po-bar">
+        <button class="btn small" id="pauseBtn" title="Fige la partie opérative (les capteurs ne bougent plus)">Figer</button>
+        <button class="btn small" id="stepBtn" disabled title="Avance la partie opérative de 0,1 s">+ 0,1 s</button>
+        <span class="demo-ctl" id="demoCtl"><label><input type="checkbox" id="demoLoop" checked> Enchaîner les cycles (DCY simulé)</label></span>
+        <span class="spacer"></span>
+        <span class="legendair">Chambres des vérins : <i class="off"></i>hors pression <i class="on"></i>sous pression</span>
+      </div>
+      <div class="warnbox" id="warn"></div>
+    </div>
+    <div class="iogrid">
+      <div class="card">
+        <h2>Entrées (%I) — capteurs et pupitre</h2>
+        <div class="inrow">
+          <div class="dcy">
+            <button id="dcy">DCY</button>
+            <div class="hint">maintenir<br>(ou <b>Espace</b>)</div>
+          </div>
+          <div class="io" id="inputs"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Sorties (%Q) — électrovannes</h2>
+        <div class="io" id="outputs"></div>
+        <div class="hint" style="color:var(--muted);font-size:11.5px;margin-top:6px" id="outHint"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col col-g7">
+    <div class="card">
+      <h2>GRAFCET du poste — évolution</h2>
+      <div id="g7"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>étape active</span>
+        <span><i style="background:var(--warn)"></i>transition validée</span>
+        <span><i style="background:var(--on)"></i>réceptivité vraie</span>
+        <span style="flex-basis:100%">En mode Automate, la temporisation affichée est mesurée depuis l'activation du bit d'étape (écart ≈ 1 cycle automate avec le TON).</span>
+      </div>
+      <div class="stepdesc" id="stepdesc">—</div>
+    </div>
+  </div>
+</main>
+
+<!-- Réglages repliés, sous la zone visible : adresses TIA et pannes injectables -->
+<section class="extra">
+    <div class="card">
+      <details>
+        <summary>Adresses (à faire coïncider avec la table de variables TIA)</summary>
+        <div class="cfg" id="cfg"></div>
+        <div class="cfg"><div class="full">
+          <button class="btn small" id="cfgApply">Appliquer</button>
+          <button class="btn small" id="cfgReset">Valeurs par défaut</button>
+        </div></div>
+      </details>
+    </div>
+    <div class="card">
+      <details>
+        <summary>Pannes injectables — diagnostic <span id="faultCount" class="muted"></span></summary>
+        <div class="faults">
+          <label><input type="checkbox" data-f="b2"> Capteur <b>10B2</b> hors service (ne passe plus à 1)</label>
+          <label><input type="checkbox" data-f="leak"> <b>Fuite sur le circuit de vide</b> : le couvercle est lâché 1,5 s après la prise</label>
+          <label><input type="checkbox" data-f="a30"> Vérin <b>30A</b> bloqué mécaniquement (ne se déplace plus)</label>
+          <div class="muted" style="font-size:13px">Les étudiants observent le symptôme (étape bloquée, couvercle tombé) et remontent à la cause.</div>
+        </div>
+      </details>
+    </div>
+</section>
+
+<script>
+// Ancien Edge (EdgeHTML) : CanvasRenderingContext2D.roundRect absent, rectangle a coins arrondis de repli
+if (window.CanvasRenderingContext2D && !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    r = Math.min(+r || 0, Math.abs(w) / 2, Math.abs(h) / 2);
+    this.moveTo(x + r, y); this.arcTo(x + w, y, x + w, y + h, r); this.arcTo(x + w, y + h, x, y + h, r);
+    this.arcTo(x, y + h, x, y, r); this.arcTo(x, y, x + w, y, r); this.closePath();
+  };
+}
+</script><script>
+'use strict';
+// =====================================================================
+//  Définition des E/S — adresses par défaut = tableau des E/S codifiées du dossier ERMET
+//  (entrées %IB1, sorties %QB2), repris dans le document « Traduction G7 → Ladder » (2026-09-29).
+// =====================================================================
+const INPUTS = [
+  { n: 'DCY',  a: '%I1.4', d: 'Démarrer le cycle (BP NO)' },
+  { n: '10B1', a: '%I1.2', d: 'Couvercle en haut — vérin 10A, tige rentrée' },
+  { n: '10B2', a: '%I1.3', d: 'Couvercle en bas — vérin 10A, tige sortie' },
+  { n: '30B1', a: '%I1.0', d: 'Couvercle à gauche — vérin 30A, tige rentrée' },
+  { n: '30B2', a: '%I1.1', d: 'Couvercle à droite — vérin 30A, tige sortie' },
+];
+const OUTPUTS = [
+  { n: '10AV14', a: '%Q2.2', d: 'Descendre le couvercle — 10A monostable (remonte au repos)' },
+  { n: '11AV12', a: '%Q2.1', d: 'Saisir le couvercle — aspiration ventouse (bistable)' },
+  { n: '11AV14', a: '%Q2.0', d: 'Lâcher le couvercle — relâchement ventouse (bistable)' },
+  { n: '30AV12', a: '%Q2.3', d: 'Déplacer le couvercle à gauche — 30A bistable' },
+  { n: '30AV14', a: '%Q2.4', d: 'Déplacer le couvercle à droite — 30A bistable' },
+];
+const DEFAULT_STEP_BYTE = '%MB10';
+// GRAFCET du poste (relevé sur images/G7.jpeg, 2026-10-05).
+// Actions : « X:=1 » / « X:=0 » = action mémorisée à l'activation de l'étape, sinon action continue.
+// Réceptivité : produit (ET) de termes ; { tempo: s } = temporisation Xi/s.
+const G7 = [
+  { acts: [],                        rec: ['DCY', '10B1', '30B1'], desc: 'Étape 0 — attente. Départ sur DCY, ventouse en haut (10B1) et chariot à gauche (30B1).' },
+  { acts: ['10AV14:=1'],             rec: ['10B2'],                desc: 'Étape 1 — 10AV14 := 1 : descente de 10A vers le couvercle, jusqu\'au capteur bas 10B2.' },
+  { acts: ['11AV12'],                rec: [{ tempo: 2 }],          desc: 'Étape 2 — aspiration (11AV12), descente maintenue (10AV14 reste à 1) ; 2 s pour établir le vide.' },
+  { acts: ['10AV14:=0'],             rec: ['10B1'],                desc: 'Étape 3 — 10AV14 := 0 : la tige remonte (10V monostable), couvercle tenu par le vide. Fin sur 10B1.' },
+  { acts: ['30AV14'],                rec: ['30B2'],                desc: 'Étape 4 — translation de 30A vers la droite, au-dessus de l\'écrin violet, jusqu\'à 30B2.' },
+  { acts: ['10AV14:=1'],             rec: ['10B2'],                desc: 'Étape 5 — 10AV14 := 1 : descente du couvercle sur l\'écrin violet, jusqu\'à 10B2.' },
+  { acts: ['11AV14'],                rec: [{ tempo: 4 }],          desc: 'Étape 6 — relâchement (11AV14), descente maintenue ; 4 s pour casser le vide.' },
+  { acts: ['30AV12', '10AV14:=0'],   rec: ['10B1', '30B1'],        desc: 'Étape 7 — 10AV14 := 0 : remontée ; retour du chariot à gauche (30AV12). Fin quand 10B1 ET 30B1.' },
+];
+// Correction du 2026-10-06 par rapport au dessin G7.jpeg : « 10AV14:=0 » déplacé de l'étape 2 à la 3
+// et de la 6 à la 7, pour que la ventouse reste en bas pendant les temporisations (10V monostable).
+const actOf = (a) => { const m = /^(\w+):=([01])$/.exec(a); return m ? { out: m[1], stored: true, v: m[2] === '1' } : { out: a, stored: false }; };
+const recText = (i) => G7[i].rec.map(x => typeof x === 'string' ? x : `X${i}/${x.tempo} s`).join(' · ');
+function recTrue(i, t, over = {}) { return G7[i].rec.every(x => typeof x === 'string' ? (x in over ? over[x] : inp[x]) : t >= x.tempo); }
+
+// =====================================================================
+//  État
+// =====================================================================
+let addr = loadAddr();
+let mode = 'plc';
+const inp = { DCY: false, '10B1': true, '10B2': false, '30B1': true, '30B2': false };
+const out = { '10AV14': false, '11AV12': false, '11AV14': false, '30AV12': false, '30AV14': false };
+const S = {                         // partie opérative
+  p10: 0, p30: 0,                   // positions 0..1 (0 = rentré)
+  vac: false, mem30: false,         // mémoires pneumatiques (11V, 30V)
+  held: false, lid: 'brown',        // brown (sur l'écrin marron) | held | placed (sur l'écrin violet) | falling | floor
+  lidX: 0, lidY: 0, lidTimer: 0,
+  boxX: 650, boxHasLid: false, boxTimer: 1.0, box: 'ready',   // ready | leaving | arriving
+  cycles: 0, clock: 0, cycleT0: -1, lastCycle: 0,            // horloge simulée, chronométrage du cycle
+  msg: '', msgKind: 'info', msgT: 0, leakT: 0,               // message d'événement affiché sur le dessin
+};
+const FAULTS = { b2: false, leak: false, a30: false };       // pannes injectables (menu « Pannes »)
+let frozen = false;                                          // partie opérative figée (bouton « Figer »)
+const plcSteps = new Array(8).fill(false);
+let demo = { step: 0, t: 0, paused: false, mem: {} };
+
+// géométrie (coordonnées logiques du canvas)
+const XL = 300, XR = 650, ROD_TOP = 235, STROKE = 130, LID_TOP = 383, LID_H = 14, FLOOR = 425;
+
+// =====================================================================
+//  Physique de la partie opérative
+// =====================================================================
+function showMsg(t, kind) { S.msg = t; S.msgKind = kind || 'info'; S.msgT = 5; log(t); }
+function physics(dt) {
+  S.clock += dt; if (S.msgT > 0) S.msgT -= dt;
+  // 10V monostable : tige sortie tant que 10AV14 = 1
+  const t10 = out['10AV14'] ? 1 : 0;
+  S.p10 = approach(S.p10, t10, dt / 1.4);
+  // 30V bistable
+  if (out['30AV14'] && !out['30AV12']) S.mem30 = true;
+  if (out['30AV12'] && !out['30AV14']) S.mem30 = false;
+  if (!FAULTS.a30) S.p30 = approach(S.p30, S.mem30 ? 1 : 0, dt / 2.0);
+  // 11V bistable : aspiration / relâchement
+  if (out['11AV12'] && !out['11AV14']) S.vac = true;
+  if (out['11AV14'] && !out['11AV12']) S.vac = false;
+  // panne « fuite de vide » : le vide tombe 1,5 s après la prise
+  let leak = false;
+  if (FAULTS.leak && S.held) { S.leakT += dt; if (S.leakT > 1.5 && S.vac) { S.vac = false; leak = true; } }
+  else S.leakT = 0;
+
+  // capteurs
+  setInput('10B1', S.p10 < 0.03);
+  setInput('10B2', S.p10 > 0.97 && !FAULTS.b2);
+  setInput('30B1', S.p30 < 0.03);
+  setInput('30B2', S.p30 > 0.97);
+
+  const tipX = XL + S.p30 * (XR - XL);
+  const tipY = ROD_TOP + S.p10 * STROKE + 18;
+
+  // prise du couvercle : vide établi, ventouse en bas sur l'écrin marron
+  if (S.vac && !S.held && S.lid === 'brown' && S.p10 > 0.97 && S.p30 < 0.03) {
+    S.held = true; S.lid = 'held'; showMsg('Couvercle saisi sur l\'écrin marron.');
+  }
+  // relâchement
+  if (!S.vac && S.held) {
+    S.held = false;
+    if (S.p30 > 0.97 && S.p10 > 0.97 && !S.boxHasLid && S.box === 'ready') {
+      S.lid = 'placed'; S.boxHasLid = true; S.boxTimer = 1.0; S.cycles++;
+      showMsg(`Couvercle déposé sur l'écrin violet — cycle n°${S.cycles} terminé.`, 'ok');
+    } else if (S.p30 < 0.03 && S.p10 > 0.9) {
+      S.lid = 'brown';                      // relâché au ras de l'écrin marron : il y retombe
+      showMsg(leak ? '⚠ Fuite de vide : le couvercle est retombé sur l\'écrin marron.' : '⚠ Couvercle relâché sur l\'écrin marron, sans avoir été déplacé.', 'danger');
+    } else {
+      S.lid = 'falling'; S.lidX = tipX; S.lidY = tipY;
+      showMsg(leak ? '⚠ Fuite de vide : le couvercle tombe en transit !' : '⚠ Couvercle lâché hors de l\'écrin violet : il tombe !', 'danger');
+    }
+  }
+  if (S.lid === 'held') { S.lidX = tipX; S.lidY = tipY; }
+  if (S.lid === 'falling') {
+    S.lidY += 500 * dt;
+    if (S.lidY + LID_H >= FLOOR) { S.lidY = FLOOR - LID_H; S.lid = 'floor'; S.lidTimer = 3; }
+  }
+  if (S.lid === 'floor') { S.lidTimer -= dt; if (S.lidTimer <= 0) { S.lid = 'brown'; showMsg('Couvercle ramassé et remis sur l\'écrin marron.'); } }
+  // évacuation de l'écrin violet fermé : une fois la ventouse remontée, il part à droite sur le
+  // convoyeur, un écrin violet vide arrive ; un nouveau couvercle est prêt sur l'écrin marron
+  if (S.box === 'ready' && S.boxHasLid && S.p10 < 0.03) { S.boxTimer -= dt; if (S.boxTimer <= 0) { S.box = 'leaving'; S.lid = 'brown'; } }
+  else if (S.box === 'ready' && S.boxHasLid) S.boxTimer = 1.0;
+  if (S.box === 'leaving') { S.boxX += 260 * dt; if (S.boxX > 1100) { S.boxX = -150; S.boxHasLid = false; S.box = 'arriving'; } }
+  if (S.box === 'arriving') { S.boxX = Math.min(S.boxX + 320 * dt, XR); if (S.boxX >= XR) S.box = 'ready'; }
+}
+function approach(v, t, step) { return v < t ? Math.min(t, v + step) : Math.max(t, v - step); }
+
+// =====================================================================
+//  Dessin
+// =====================================================================
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+function draw() {
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.lineWidth = 2; ctx.strokeStyle = '#18212B'; ctx.font = 'bold 15px Calibri, Arial';
+
+  // sol + convoyeur écrins
+  ctx.fillStyle = '#E3E7EB'; ctx.fillRect(0, FLOOR, W, H - FLOOR);
+  ctx.strokeStyle = '#8a9096'; ctx.beginPath(); ctx.moveTo(0, FLOOR); ctx.lineTo(W, FLOOR); ctx.stroke();
+  for (let x = 480; x < W; x += 40) { ctx.beginPath(); ctx.arc(x, FLOOR + 8, 5, 0, Math.PI * 2); ctx.stroke(); }
+  txt('Convoyeur écrins →', 820, FLOOR + 26, '#5A6572', 'center');
+
+  // bâti
+  ctx.fillStyle = '#5A6572'; ctx.fillRect(110, 20, 780, 14);
+  ctx.fillRect(110, 20, 14, FLOOR - 20); ctx.fillRect(876, 20, 14, FLOOR - 20);
+
+  // vérin horizontal 30A (bistable : la chambre sous pression est mémorisée par 30V)
+  const carX = XL + S.p30 * (XR - XL);
+  cyl(130, 45, 300, 24, true, S.p30, S.mem30);
+  ctx.fillStyle = '#9aa3ab'; ctx.fillRect(430, 53, carX - 40 - 430, 8);       // tige
+  label('30A', 215, 99, '#1D5AA6');
+  sensor(160, 78, '30B1', inp['30B1']); sensor(400, 78, '30B2', inp['30B2']);
+
+  // chariot
+  ctx.fillStyle = '#1D5AA6'; ctx.fillRect(carX - 40, 36, 80, 58);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Calibri'; ctx.textAlign = 'center'; ctx.fillText('chariot', carX, 70);
+
+  // vérin vertical 10A (monostable : chambre arrière sous pression si 10AV14 = 1, sinon ressort → chambre avant)
+  cyl(carX - 18, 95, 36, 140, false, S.p10, !!out['10AV14']);
+  txt('10A', carX - 26, 170, '#1D5AA6', 'right', 'bold 17px Calibri');
+  sensor(carX + 34, 108, '10B1', inp['10B1']); sensor(carX + 34, 222, '10B2', inp['10B2']);
+  const tipY = ROD_TOP + S.p10 * STROKE;
+  ctx.fillStyle = '#9aa3ab'; ctx.fillRect(carX - 4, ROD_TOP, 8, tipY - ROD_TOP);
+
+  // ventouse 11A
+  ctx.fillStyle = S.vac ? '#22C55E' : '#C9D0D6';
+  ctx.beginPath(); ctx.moveTo(carX - 22, tipY + 18); ctx.lineTo(carX + 22, tipY + 18); ctx.lineTo(carX + 12, tipY); ctx.lineTo(carX - 12, tipY); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  if (S.vac) { ctx.strokeStyle = '#2F6B4F'; for (const dx of [-14, 0, 14]) { ctx.beginPath(); ctx.moveTo(carX + dx, tipY + 30); ctx.lineTo(carX + dx, tipY + 20); ctx.stroke(); } }
+  txt('11A ventouse' + (S.vac ? ' — vide établi' : ''), carX + 30, tipY + 12, '#5A6572', 'left');
+
+  // écrin marron (poste de prise) : le couvercle à déplacer est posé dessus
+  box(XL, S.lid === 'brown', '#9C6B3C', '#5e3d1e');
+  txt('Écrin marron — prise', XL, FLOOR + 26, '#5A6572', 'center');
+
+  // écrin violet (poste de dépose), sur le convoyeur
+  box(S.boxX, S.boxHasLid, '#7C5CBF', '#4b357a');
+  txt('Écrin violet — dépose', XR, FLOOR + 26, '#5A6572', 'center');
+  // couvercle mobile
+  if (S.lid === 'held' || S.lid === 'falling' || S.lid === 'floor') lid(S.lidX, S.lidY);
+
+  // bandeau d'état (ligne du haut du dessin) : compteur, durée du cycle, message d'événement, mode
+  ctx.textAlign = 'left'; ctx.font = 'bold 15px Calibri'; ctx.fillStyle = frozen ? '#C55A11' : '#18212B';
+  const cyc = S.lastCycle ? ` · dernier cycle : ${S.lastCycle.toFixed(1)} s` : (S.cycleT0 >= 0 ? ` · cycle en cours : ${(S.clock - S.cycleT0).toFixed(1)} s` : '');
+  ctx.fillText((frozen ? '⏸ Figé · ' : '') + `Cycles terminés : ${S.cycles}` + cyc, 20, 16);
+  if (S.msgT > 0) {
+    const col = { info: '#1D5AA6', ok: '#2F6B4F', danger: '#C00000' }[S.msgKind];
+    ctx.font = 'bold 14px Calibri'; ctx.textAlign = 'center'; ctx.fillStyle = col;
+    ctx.fillText(S.msg, 530, 16);
+  }
+  ctx.textAlign = 'right'; ctx.font = '13px Calibri'; ctx.fillStyle = '#1D5AA6';
+  ctx.fillText(mode === 'plc' ? 'Sorties pilotées par l\'automate' : 'Sorties pilotées par le GRAFCET interne (démo)', W - 20, 16);
+
+  // vérin double effet : corps, piston, chambre arrière (côté fond) et chambre avant (côté tige)
+  function cyl(x, y, w, h, horiz, p, rearPressed) {
+    const ON = '#F4B183', OFF = '#E3E7EB', PW = 8;
+    ctx.strokeStyle = '#18212B'; ctx.lineWidth = 2;
+    if (horiz) {
+      const px = x + 6 + p * (w - 12 - PW);
+      ctx.fillStyle = rearPressed ? ON : OFF; ctx.fillRect(x, y, px - x, h);
+      ctx.fillStyle = rearPressed ? OFF : ON; ctx.fillRect(px + PW, y, x + w - px - PW, h);
+      ctx.fillStyle = '#5A6572'; ctx.fillRect(px, y, PW, h);
+    } else {
+      const py = y + 6 + p * (h - 12 - PW);
+      ctx.fillStyle = rearPressed ? ON : OFF; ctx.fillRect(x, y, w, py - y);
+      ctx.fillStyle = rearPressed ? OFF : ON; ctx.fillRect(x, py + PW, w, y + h - py - PW);
+      ctx.fillStyle = '#5A6572'; ctx.fillRect(x, py, w, PW);
+    }
+    ctx.strokeRect(x, y, w, h);
+  }
+  function lid(x, y) {               // couvercle : doré, visible sur les deux écrins
+    ctx.fillStyle = '#E6B422'; ctx.strokeStyle = '#7a5a00'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(x - 42, y, 84, LID_H, 4); ctx.fill(); ctx.stroke();
+  }
+  function box(x, withLid, fill, edge) {
+    ctx.fillStyle = fill; ctx.strokeStyle = edge; ctx.lineWidth = 2;
+    ctx.fillRect(x - 44, LID_TOP + LID_H, 88, FLOOR - LID_TOP - LID_H); ctx.strokeRect(x - 44, LID_TOP + LID_H, 88, FLOOR - LID_TOP - LID_H);
+    if (withLid) lid(x, LID_TOP);
+  }
+  function sensor(x, y, name, on) {
+    ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fillStyle = on ? '#22C55E' : '#B8BEC4'; ctx.fill(); ctx.strokeStyle = '#18212B'; ctx.stroke();
+    txt(name, x + 12, y + 5, '#18212B', 'left');
+  }
+  function label(t, x, y, c) { txt(t, x, y, c, 'center', 'bold 17px Calibri'); }
+  function txt(t, x, y, c, align, font) { ctx.font = font || '14px Calibri, Arial'; ctx.fillStyle = c; ctx.textAlign = align; ctx.fillText(t, x, y); }
+}
+
+// =====================================================================
+//  GRAFCET interne (mode démo)
+// =====================================================================
+function demoTick(dt) {
+  const st = demo.step;
+  demo.t += dt;
+  // DCY simulé en enchaînement automatique, 1,5 s après le retour en étape 0
+  const dcy = inp.DCY || (document.getElementById('demoLoop').checked && demo.t > 1.5);
+  if (recTrue(st, demo.t, { DCY: dcy })) {
+    const next = (st + 1) % G7.length;
+    demo.step = next; demo.t = 0;
+    for (const a of G7[next].acts.map(actOf)) if (a.stored) demo.mem[a.out] = a.v;
+    log(`Transition ${st} → ${next} : réceptivité « ${recText(st)} » vraie.`);
+  }
+  const cont = G7[demo.step].acts.map(actOf).filter(a => !a.stored).map(a => a.out);
+  for (const k in out) out[k] = cont.includes(k) || !!demo.mem[k];
+}
+
+// =====================================================================
+//  GRAFCET animé (SVG) — même rendu en mode Automate (bits %M10.x) et Démo
+// =====================================================================
+const SVGNS = 'http://www.w3.org/2000/svg';
+const GY0 = 34, PITCH = 100, SX = 64, AX = 112;      // haut de l'étape 0, pas vertical, axe, début des actions
+const g7el = { steps: [], acts: [], trs: [], vars: [], tmr: [] };
+let g7prev = new Array(8).fill(false), g7since = new Array(8).fill(0);
+function sv(tag, attrs, parent, text) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function buildG7() {
+  const n = G7.length, yEnd = GY0 + (n - 1) * PITCH + 96;
+  const svg = sv('svg', { viewBox: `0 0 360 ${yEnd + 14}`, class: 'g7', role: 'img', 'aria-label': 'GRAFCET du poste ERMET' });
+  // rebouclage 7 → 0, flèche vers le haut (liaison remontante)
+  sv('path', { class: 'link', d: `M${SX} ${yEnd - 22} V${yEnd} H16 V12 H${SX} V${GY0}` }, svg);
+  const ym = (12 + yEnd) / 2;
+  sv('path', { d: `M16 ${ym - 9} L9 ${ym + 5} L23 ${ym + 5} Z`, fill: '#18212B' }, svg);
+  for (let i = 0; i < n; i++) {
+    const y = GY0 + i * PITCH, ty = y + 72;
+    // liaison vers la transition puis l'étape suivante
+    sv('path', { class: 'link', d: `M${SX} ${y + 44} V${i < n - 1 ? y + PITCH : ty + 2}` }, svg);
+    // étape
+    const g = sv('g', { class: 'step' }, svg);
+    sv('rect', { class: 'stepbox', x: SX - 22, y, width: 44, height: 44 }, g);
+    if (i === 0) sv('rect', { class: 'stepin', x: SX - 17, y: y + 5, width: 34, height: 34 }, g);
+    sv('text', { class: 'num', x: SX, y: y + 28 }, g, i);
+    sv('circle', { class: 'token', cx: SX, cy: y + 36, r: 3.5 }, g);
+    g7el.steps.push(g);
+    // actions (cases accolées, comme sur le dessin)
+    const acts = [];
+    if (G7[i].acts.length) {
+      sv('path', { class: 'link', d: `M${SX + 22} ${y + 22} H${AX}` }, svg);
+      let x = AX;
+      for (const a of G7[i].acts) {
+        const w = 22 + a.length * 8.6, ga = sv('g', { class: 'act' }, svg);
+        sv('rect', { x, y: y + 5, width: w, height: 34 }, ga);
+        sv('text', { x: x + w / 2, y: y + 27 }, ga, a);
+        // action mémorisée : événement d'activation (flèche montante sous la case, NF EN 60848)
+        if (actOf(a).stored) {
+          const ex = x + 14;
+          sv('line', { class: 'evt', x1: ex, y1: y + 56, x2: ex, y2: y + 45 }, ga);
+          sv('path', { class: 'evt', d: `M${ex} ${y + 39} L${ex - 5} ${y + 47} L${ex + 5} ${y + 47} Z` }, ga);
+        }
+        acts.push(ga); x += w;
+      }
+    }
+    g7el.acts.push(acts);
+    // transition et réceptivité
+    const gt = sv('g', { class: 'tr' }, svg);
+    sv('line', { class: 'tbar', x1: SX - 15, y1: ty, x2: SX + 15, y2: ty }, gt);
+    const rt = sv('text', { class: 'rec', x: SX + 26, y: ty + 6 }, gt);
+    const vars = [];
+    G7[i].rec.forEach((x, k) => {
+      if (k) sv('tspan', {}, rt, ' · ');
+      if (typeof x === 'string') { const s = sv('tspan', { class: 'v' }, rt, x); s.dataset.v = x; vars.push(s); }
+      else sv('tspan', {}, rt, `X${i}/${x.tempo} s`);
+    });
+    g7el.vars.push(vars);
+    let tm = null;
+    if (G7[i].rec.some(x => typeof x !== 'string')) {
+      const gm = sv('g', { class: 'tmr' }, gt);
+      sv('rect', { class: 'bg', x: SX + 26, y: ty + 12, width: 110, height: 7, rx: 3 }, gm);
+      tm = { fg: sv('rect', { class: 'fg', x: SX + 26, y: ty + 12, width: 0, height: 7, rx: 3 }, gm),
+             txt: sv('text', { class: 'rec', x: SX + 144, y: ty + 20, style: 'font-size:14px;fill:#5A6572' }, gm, '') };
+    }
+    g7el.tmr.push(tm);
+    g7el.trs.push(gt);
+  }
+  const host = document.getElementById('g7'); host.innerHTML = ''; host.appendChild(svg);
+}
+function refreshG7(active, now) {
+  for (let i = 0; i < G7.length; i++) {
+    if (active[i] && !g7prev[i]) g7since[i] = now;
+    if (!active[i] && g7prev[i]) {                      // franchissement de la transition i
+      const tr = g7el.trs[i]; tr.classList.remove('fired'); void tr.getBBox(); tr.classList.add('fired');
+    }
+    const t = mode === 'demo' && active[i] ? demo.t : (now - g7since[i]) / 1000;
+    const ok = active[i] && recTrue(i, t);
+    g7el.steps[i].classList.toggle('active', active[i]);
+    for (const a of g7el.acts[i]) a.classList.toggle('on', active[i]);
+    g7el.trs[i].classList.toggle('valid', active[i]);
+    g7el.trs[i].classList.toggle('ready', ok);
+    for (const s of g7el.vars[i]) s.classList.toggle('true', !!inp[s.dataset.v]);
+    const tm = g7el.tmr[i];
+    if (tm && active[i]) {
+      const d = G7[i].rec.find(x => typeof x !== 'string').tempo;
+      tm.fg.setAttribute('width', 110 * Math.min(1, t / d));
+      tm.txt.textContent = Math.min(t, d).toFixed(1) + ' s';
+    }
+  }
+  g7prev = active.slice();
+}
+
+// =====================================================================
+//  Liaison PLCSIM Advanced (PlcBridge.exe, WebSocket)
+// =====================================================================
+let ws = null, bridgeOk = false, plcOk = false, retry = null, plcInfo = '', pendingOff = false;
+function connect() {
+  try { ws = new WebSocket('ws://localhost:8765'); } catch (e) { return scheduleRetry(); }
+  ws.onopen = () => { bridgeOk = true; subscribe(); writeAllInputs(); setStatus(); };
+  ws.onclose = () => { bridgeOk = false; plcOk = false; setStatus(); scheduleRetry(); };
+  ws.onerror = () => { };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.type === 'status') {
+      // Le pont envoie ce message à la connexion de la page. Il ne se connecte à PLCSIM
+      // qu'une seule fois, à son lancement : instance démarrée après coup = relancer le .bat.
+      const was = plcOk;
+      plcOk = !!m.plc_connected;
+      plcInfo = [m.plc_instance || m.plc_ip, m.plc_state].filter(Boolean).join(' · ');
+      pendingOff = !plcOk && m.plc_state === 'Off';
+      setStatus();
+      if (plcOk) log(`PLCSIM Advanced connecté${plcInfo ? ' : ' + plcInfo : ''}.`);
+      else if (pendingOff) log(`Instance « ${m.plc_instance} » créée mais non démarrée : cliquer Start dans PLCSIM Advanced, puis relancer Simulateur_ERMET.bat.`);
+      else log(was ? 'Pont redémarré sans instance PLCSIM.' : 'Pont démarré mais aucune instance PLCSIM : démarrer l\'instance (RUN), puis relancer Simulateur_ERMET.bat.');
+    }
+    if (m.type === 'update' && mode === 'plc') {
+      for (const [a, v] of Object.entries(m.variables)) {
+        const o = OUTPUTS.find(x => addr[x.n] === a);
+        if (o) out[o.n] = !!v;
+        const mb = stepAddr();
+        const i = mb.indexOf(a); if (i >= 0) plcSteps[i] = !!v;
+      }
+    }
+  };
+}
+function scheduleRetry() { clearTimeout(retry); retry = setTimeout(connect, 3000); }
+function subscribe() {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'subscribe', addresses: [...OUTPUTS.map(o => addr[o.n]), ...stepAddr()] }));
+}
+function stepAddr() {
+  const m = /^%?MB?(\d+)$/i.exec(addr.MB || DEFAULT_STEP_BYTE);
+  const b = m ? m[1] : '10';
+  return Array.from({ length: 8 }, (_, i) => `%M${b}.${i}`);
+}
+function writeInput(name) {
+  if (mode !== 'plc' || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'write', addr: addr[name], value: inp[name] }));
+}
+function writeAllInputs() { for (const i of INPUTS) writeInput(i.n); }
+function setInput(name, v) { if (inp[name] === v) return; inp[name] = v; writeInput(name); }
+
+// =====================================================================
+//  Interface
+// =====================================================================
+function setStatus() {
+  const dot = document.getElementById('dot'), t = document.getElementById('statusTxt'), w = document.getElementById('warn');
+  if (plcOk) { dot.className = 'dot on'; t.textContent = 'PLCSIM Advanced connecté' + (plcInfo ? ' — ' + plcInfo : ''); }
+  else if (bridgeOk) { dot.className = 'dot warn'; t.textContent = pendingOff ? `Instance ${plcInfo} — non démarrée` : 'Pont actif — pas d\'instance PLCSIM'; }
+  else { dot.className = 'dot off'; t.textContent = 'Pont PlcBridge non joignable'; }
+  w.style.display = (mode === 'plc' && !plcOk) ? 'block' : 'none';
+  w.innerHTML = bridgeOk && pendingOff
+    ? 'L\'instance PLCSIM Advanced existe mais est à l\'état <b>Off</b> : cliquer <b>Start</b> (puis attendre RUN) dans PLCSIM Advanced, charger le programme depuis TIA Portal, puis relancer <b>Simulateur_ERMET.bat</b>.'
+    : bridgeOk
+    ? 'Aucune instance PLCSIM Advanced détectée : démarrer l\'instance (état RUN) dans PLCSIM Advanced, charger le programme depuis TIA Portal, puis relancer <b>Simulateur_ERMET.bat</b>.'
+    : 'Le pont <b>PlcBridge.exe</b> n\'est pas lancé : ouvrir le simulateur par <b>Simulateur_ERMET.bat</b> (accepter l\'élévation administrateur). En attendant, utiliser le mode Démo guidée.';
+}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.modes button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  document.getElementById('demoCtl').style.display = m === 'demo' ? 'flex' : 'none';
+  document.getElementById('outHint').textContent = m === 'plc' ? 'Lecture des sorties %Q de l\'automate virtuel.' : 'Sorties produites par le GRAFCET de démonstration.';
+  if (m === 'demo') { demo = { step: 0, t: 0, paused: false, mem: {} }; }
+  if (m !== 'plc') plcSteps.fill(false);
+  if (m === 'plc') { writeAllInputs(); subscribe(); }
+  setStatus(); log(`Mode « ${{ plc: 'Automate (PLCSIM)', demo: 'Démo guidée' }[m]} ».`);
+}
+function buildIo() {
+  const mk = (list, el) => {
+    el.innerHTML = '';
+    for (const x of list) {
+      const r = document.createElement('div'); r.className = 'row'; r.dataset.n = x.n;
+      r.innerHTML = `<div class="led" id="led_${x.n}"></div><div class="name">${x.n}</div><div class="addr" id="addr_${x.n}">${addr[x.n]}</div><div class="desc">${x.d}</div>`;
+      el.appendChild(r);
+    }
+  };
+  mk(INPUTS, document.getElementById('inputs'));
+  mk(OUTPUTS, document.getElementById('outputs'));
+  const cfg = document.getElementById('cfg'); cfg.innerHTML = '';
+  for (const x of [...INPUTS, ...OUTPUTS]) cfg.insertAdjacentHTML('beforeend', `<label>${x.n}</label><input data-n="${x.n}" value="${addr[x.n]}">`);
+  cfg.insertAdjacentHTML('beforeend', `<label>Étapes</label><input data-n="MB" value="${addr.MB}"><div style="grid-column:span 2;color:var(--muted);font-size:13px">octet des bits d'étape (X0..X7)</div>`);
+}
+let lastStep = -1;
+function refreshIo() {
+  for (const x of INPUTS) document.getElementById('led_' + x.n).classList.toggle('on', !!inp[x.n]);
+  for (const x of OUTPUTS) document.getElementById('led_' + x.n).classList.toggle('on', !!out[x.n]);
+  const act = G7.map((_, i) => mode === 'demo' ? i === demo.step : mode === 'plc' ? plcSteps[i] : false);
+  refreshG7(act, performance.now());
+  const on = act.reduce((l, v, i) => v ? [...l, i] : l, []);
+  // chronométrage du cycle : départ au passage 0 → 1, fin au retour en 0 (horloge simulée)
+  const cur = on.length === 1 ? on[0] : -1;
+  if (cur === 1 && lastStep === 0) S.cycleT0 = S.clock;
+  if (cur === 0 && lastStep === 7 && S.cycleT0 >= 0) { S.lastCycle = S.clock - S.cycleT0; S.cycleT0 = -1; }
+  if (cur >= 0) lastStep = cur;
+  const sd = document.getElementById('stepdesc');
+  if (on.length > 1) sd.innerHTML = `<b style="color:var(--danger)">⚠ Plusieurs étapes actives : ${on.map(i => 'X' + i).join(', ')}.</b><br>GRAFCET linéaire : une seule étape doit être active. Vérifier les RESET de l'étape amont dans les réseaux de transition.`;
+  else if (on.length === 1) {
+    const g = G7[on[0]];
+    sd.innerHTML = `<b>${g.desc}</b><br>Actions : ${g.acts.join(', ') || 'aucune'} · Transition suivante : ${recText(on[0])}`;
+  } else sd.textContent = mode === 'plc' ? 'Aucun bit d\'étape à 1 (vérifier l\'OB100 et l\'octet des étapes dans « Adresses »).' : '—';
+}
+function loadAddr() {
+  const d = {}; for (const x of [...INPUTS, ...OUTPUTS]) d[x.n] = x.a; d.MB = DEFAULT_STEP_BYTE;
+  try { return Object.assign(d, JSON.parse(localStorage.getItem('ermet_sim_addr_v2') || '{}')); } catch (e) { return d; }
+}
+function applyAddr(reset) {
+  if (reset) { localStorage.removeItem('ermet_sim_addr_v2'); addr = loadAddr(); }
+  else {
+    document.querySelectorAll('#cfg input').forEach(i => { addr[i.dataset.n] = i.value.trim().toUpperCase().replace(/^([IQM])/, '%$1'); });
+    try { localStorage.setItem('ermet_sim_addr_v2', JSON.stringify(addr)); } catch (e) { }
+  }
+  buildIo(); subscribe(); writeAllInputs(); log('Adresses appliquées.');
+}
+// Plus de journal à l'écran : les événements restent consultables dans la console (F12).
+function log(t) { console.info('[ERMET] ' + t); }
+
+// DCY : bouton momentané + touche Espace
+const dcyBtn = document.getElementById('dcy');
+const press = (v) => { dcyBtn.classList.toggle('pressed', v); setInput('DCY', v); };
+dcyBtn.addEventListener('mousedown', () => press(true)); dcyBtn.addEventListener('mouseup', () => press(false)); dcyBtn.addEventListener('mouseleave', () => press(false));
+dcyBtn.addEventListener('touchstart', e => { e.preventDefault(); press(true); }); dcyBtn.addEventListener('touchend', e => { e.preventDefault(); press(false); });
+document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT') { e.preventDefault(); press(true); } });
+document.addEventListener('keyup', e => { if (e.code === 'Space') press(false); });
+document.querySelectorAll('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+// Figer / pas à pas : la partie opérative n'avance plus (l'automate, lui, continue de tourner)
+const pauseBtn = document.getElementById('pauseBtn'), stepBtn = document.getElementById('stepBtn');
+pauseBtn.addEventListener('click', () => { frozen = !frozen; pauseBtn.textContent = frozen ? 'Reprendre' : 'Figer'; stepBtn.disabled = !frozen; });
+stepBtn.addEventListener('click', () => { for (let i = 0; i < 5; i++) tick(0.02); });
+// pannes injectables
+document.querySelectorAll('.faults input').forEach(c => c.addEventListener('change', () => {
+  FAULTS[c.dataset.f] = c.checked;
+  const n = Object.values(FAULTS).filter(Boolean).length;
+  document.getElementById('faultCount').textContent = n ? `(${n} active${n > 1 ? 's' : ''})` : '';
+  log(`Panne « ${c.dataset.f} » ${c.checked ? 'activée' : 'levée'}.`);
+}));
+document.getElementById('cfgApply').addEventListener('click', () => applyAddr(false));
+document.getElementById('cfgReset').addEventListener('click', () => applyAddr(true));
+
+// boucle
+let last = performance.now();
+function tick(dt) { if (mode === 'demo') demoTick(dt); physics(dt); }
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!frozen) tick(dt);
+  draw(); refreshIo();
+  requestAnimationFrame(frame);
+}
+const urlMode = new URLSearchParams(location.search).get('mode');
+buildIo(); buildG7(); setMode(['plc', 'demo'].includes(urlMode) ? urlMode : 'plc'); connect();
+// ?ff=N : avance la simulation de N secondes au chargement (test hors ligne, pas à pas de 20 ms)
+const ff = parseFloat(new URLSearchParams(location.search).get('ff') || '0');
+for (let i = 0; i < ff * 50; i++) tick(0.02);
+if (ff > 0) log(`Avance rapide de ${ff} s : ${S.cycles} cycle(s), étape X${demo.step}, couvercle « ${S.lid} ».`);
+requestAnimationFrame(frame);
+log('Simulateur prêt. Modes : Automate (PLCSIM Advanced), Démo guidée (GRAFCET interne).');
+</script>
+</body>
+</html>

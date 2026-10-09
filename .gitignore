@@ -1,0 +1,5 @@
+# DLL Siemens : non redistribuable, chargée depuis l'installation PLCSim Advanced du poste
+Siemens.Simatic.Simulation.Runtime.Api*
+*.pdb
+# Documents fournisseurs
+images/DEVIS*
